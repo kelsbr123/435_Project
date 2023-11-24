@@ -43,7 +43,7 @@ public class JSONMapper extends Configured implements Tool {
                 String[] tuple = value.toString().split(":");
                 writable.putIfAbsent(new Text(tuple[0]), new Text(tuple[1]));
             }
-            context.write(key, writable);
+            if(writable.size() > 2)  context.write(key, writable);
         }
     }
 
