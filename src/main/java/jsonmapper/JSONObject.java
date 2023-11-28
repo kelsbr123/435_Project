@@ -5,13 +5,10 @@ import java.util.regex.Pattern;
 
 public class JSONObject {
 
-    private String reviewerID, reviewText;
     private final String JSON;
 
     public JSONObject(String json){
         this.JSON = json;
-        this.reviewerID = get("reviewerID");
-        this.reviewText = get("reviewText");
     }
 
     public String get(String field) {
@@ -36,14 +33,6 @@ public class JSONObject {
 
         }
         return "";
-    }
-
-    public String getReviewerID() {
-        return reviewerID;
-    }
-
-    public String getReviewText() {
-        return reviewText;
     }
 
     //    public String getFirstKey(){

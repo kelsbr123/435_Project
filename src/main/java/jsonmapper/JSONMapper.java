@@ -17,9 +17,7 @@ import org.apache.hadoop.util.ToolRunner;
 
 
 import java.io.IOException;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.regex.Pattern;
 
 public class JSONMapper extends Configured implements Tool {
@@ -28,22 +26,25 @@ public class JSONMapper extends Configured implements Tool {
         public void map(LongWritable key, Text value, Context context) throws InterruptedException, IOException {
             String line = value.toString();
             JSONObject jsonObject = new JSONObject(line);
-            String reviewerID = jsonObject.getReviewerID();
+            String reviewerID = jsonObject.get("reviewerID");
             String asin = jsonObject.get("asin");
             String score = jsonObject.get("overall");
-            context.write(new Text(reviewerID), new Text(asin + ":" + score));
+            String name = jsonObject.get("reviewerName");
+            context.write(new Text(reviewerID+"/"+name), new Text(asin + ":" + score));
         }
     }
 
-    public static class JsonReducer extends Reducer<Text, Text, Text, MapWritable> {
+    public static class JSONReducer extends Reducer<Text, Text, Text, NullWritable> {
 
         public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
-            MapWritable writable = new MapWritable();
+            ArrayList<String> history = new ArrayList<>();
             for (Text value : values) {
-                String[] tuple = value.toString().split(":");
-                writable.putIfAbsent(new Text(tuple[0]), new Text(tuple[1]));
+                if(!history.contains(value.toString())) history.add(value.toString());
             }
-            if(writable.size() > 2)  context.write(key, writable);
+            if (history.size() > 4) {
+                String rows = CSVBuilder.buildRows(key.toString(), history);
+                context.write(new Text(rows), NullWritable.get());
+            }
         }
     }
 
@@ -54,17 +55,17 @@ public class JSONMapper extends Configured implements Tool {
 
     public int run(String[] args) throws Exception {
         Configuration conf = this.getConf();
-        Job job = Job.getInstance(conf, "Test");
+        Job job = Job.getInstance(conf, "JSON Mapper");
         job.setJarByClass(JSONMapper.class);
-        DistributedCache.addFileToClassPath(new Path("~/435_project/src/main/resources/json-20231013.jar"), conf);
         job.setMapperClass(JSONMapper.JsonMapper.class);
-        job.setReducerClass(JSONMapper.JsonReducer.class);
+        job.setReducerClass(JSONMapper.JSONReducer.class);
         job.setMapOutputKeyClass(Text.class);
         job.setMapOutputValueClass(Text.class);
         job.setOutputKeyClass(Text.class);
-        job.setOutputValueClass(MapWritable.class);
+        job.setOutputValueClass(NullWritable.class);
         job.setInputFormatClass(TextInputFormat.class);
         job.setOutputFormatClass(TextOutputFormat.class);
+        job.getConfiguration().set("mapreduce.output.basename", "CSV");
 
         FileInputFormat.addInputPath(job, new Path(args[0]));
         FileOutputFormat.setOutputPath(job, new Path(args[1]));
