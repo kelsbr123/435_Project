@@ -23,13 +23,22 @@ import java.util.regex.Pattern;
 public class JSONMapper extends Configured implements Tool {
 
     public static class JsonMapper extends Mapper<LongWritable, Text, Text, Text> {
+
+        private static final int PRIME = 31;
+
+        private static String idConverter(String ascii){
+            return Integer.toString(ascii.hashCode() * PRIME);
+        }
+
+
         public void map(LongWritable key, Text value, Context context) throws InterruptedException, IOException {
             String line = value.toString();
             JSONObject jsonObject = new JSONObject(line);
             String reviewerID = jsonObject.get("reviewerID");
-            String asin = jsonObject.get("asin");
+            String asin = idConverter(jsonObject.get("asin"));
             String score = jsonObject.get("overall");
             String name = jsonObject.get("reviewerName");
+
             context.write(new Text(reviewerID+"/"+name), new Text(asin + ":" + score));
         }
     }

@@ -1,24 +1,20 @@
 package RegressorPredictor;
 
-import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.ml.feature.OneHotEncoder;
+import org.apache.spark.ml.feature.VectorAssembler;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
-import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.api.java.UDF1;
+import org.apache.spark.sql.functions;
 import org.apache.spark.sql.types.DataTypes;
-import org.apache.spark.sql.types.Metadata;
-import org.apache.spark.sql.types.StructField;
-import org.apache.spark.sql.types.StructType;
-import scala.Tuple1;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
 public class Predictor {
+
+
 
 
     public static void main(String[] args) {
@@ -36,53 +32,45 @@ public class Predictor {
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
 
         // Load data (replace "path/to/your/data" with the actual path)
-        String[] featureColumns = {"userID", "purchaseHistory", "nextPurchase", "score"};
+        String[] featureColumns = {"userId", "purchaseHistory", "nextPurchase", "score"};
         Dataset<Row> data = spark.read().option("delimiter","/").csv(inputPath).drop("_c1").toDF(featureColumns);
+        data = data.drop("userID");
 
-        JavaRDD<List<String>> histories = data.javaRDD()
-                .map(row -> row.getString(1).replaceAll("\\[|\\]", ""))
-                .map(h -> Arrays.asList(h.split(",")));
-
-        JavaRDD<Object> ids = histories.map(h ->{
-            ArrayList<String> list = new ArrayList<>();
-            for(String s : h){
-                list.add(s.split(":")[0]);
+        spark.udf().register("stringToList", new UDF1<String, List<Integer>>() {
+            @Override
+            public List<Integer> call(String input) {
+                String[] temp = input.replaceAll("\\[|\\]", "").split(",");
+                List<Integer> result = new ArrayList<>();
+                for(String s : temp){
+                    result.add(Integer.parseInt(s.split(":")[0].strip()));
+                }
+                return result;
             }
-            return list;
-        }).map(RowFactory::create);
+        }, DataTypes.createArrayType(DataTypes.IntegerType));
 
-        JavaRDD<Object> scores = histories.map(h ->{
-            ArrayList<Float> list = new ArrayList<>();
-            for(String s : h){
-                list.add(Float.parseFloat(s.split(":")[1]));
-            }
-            return list;
-        }).map(RowFactory::create);
-
-        ids.take(10).forEach(h -> System.out.println(h.toString()));
-        scores.take(10).forEach(h -> System.out.println(h.toString()));
-
-
+        Dataset<Row> DF = data.withColumn("purchaseHistory",
+                functions.callUDF("stringToList", data.col("purchaseHistory"))).drop("purchaseHistory");
+        DF.show();
 
 
 
         // Split the data into training and test sets
-        Dataset<Row>[] splits = data.randomSplit(new double[]{0.7, 0.3});
+        Dataset<Row>[] splits = DF.randomSplit(new double[]{0.7, 0.3});
         Dataset<Row> trainingData = splits[0];
         Dataset<Row> testData = splits[1];
 
 
         // Assemble the feature columns into a single vector column
-//        VectorAssembler assembler = new VectorAssembler()
-//                .setInputCols(featureColumns)
-//                .setOutputCol("features");
+        VectorAssembler assembler = new VectorAssembler()
+                .setInputCols(featureColumns)
+                .setOutputCol("features");
 
-//
-//        Dataset<Row> assembledTrainingData = assembler.transform(trainingData);
-//        Dataset<Row> assembledTestData = assembler.transform(testData);
-//
-//        assembledTrainingData.show();
-//        assembledTestData.show();
+
+        Dataset<Row> assembledTrainingData = assembler.transform(trainingData);
+        Dataset<Row> assembledTestData = assembler.transform(testData);
+
+        assembledTrainingData.show();
+        assembledTestData.show();
 
 //
 //        // Create a RandomForestRegressor
@@ -104,3 +92,39 @@ public class Predictor {
         spark.stop();
     }
 }
+//
+//        JavaRDD<List<String>> histories = data.javaRDD()
+//                .map(row -> row.getString(0).replaceAll("\\[|\\]", ""))
+//                .map(h -> Arrays.asList(h.split(",")));
+//
+//        List<PurchaseHistory> ids = histories.map(h ->{
+//            PurchaseHistory hist = new PurchaseHistory();
+//            List<Integer> tmp = new ArrayList<>();
+//            for(String s : h){
+//                tmp.add(Integer.parseInt(s.split(":")[0].strip()));
+//            }
+//            hist.setHistory(tmp);
+//            return hist;
+//        }).collect();
+//
+//        List<ScoreHistory> scores = histories.map(h ->{
+//            List<Float> list = new ArrayList<>();
+//            ScoreHistory history = new ScoreHistory();
+//            for(String s : h){
+//                list.add(Float.parseFloat(s.split(":")[1]));
+//            }
+//            history.setHistory(list);
+//            return history;
+//        }).collect();
+//
+//        data.show();
+//
+//
+//        Encoder<PurchaseHistory> purchaseHistoryEncoder = Encoders.bean(PurchaseHistory.class);
+//        Dataset<Row> test = spark.createDataset(ids,purchaseHistoryEncoder).toDF("hist");
+//        String[] strings = {"hist"};
+//        Dataset<Row> df = test.toDF(strings);
+//        OneHotEncoder oneHotEncoder = new OneHotEncoder().setInputCol("hist").setOutputCol("histVect");
+//        OneHotEncoderModel model = oneHotEncoder.fit(df);
+//        Dataset<Row> encoded = model.transform(df);
+//        encoded.show();
