@@ -39,7 +39,7 @@ public class JSONMapper extends Configured implements Tool {
             String score = jsonObject.get("overall");
             String name = jsonObject.get("reviewerName");
 
-            context.write(new Text(reviewerID+"/"+name), new Text(asin + ":" + score));
+            context.write(new Text(reviewerID+","+name), new Text(asin + ":" + score));
         }
     }
 

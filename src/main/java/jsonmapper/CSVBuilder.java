@@ -14,7 +14,7 @@ public class CSVBuilder {
     public static String buildRows(String user, ArrayList<String> purchaseHistory){
 
         StringBuilder csv = new StringBuilder();
-        String row;
+        StringBuilder row = new StringBuilder();
         ArrayList<String> temp = new ArrayList<>();
 
 
@@ -23,7 +23,11 @@ public class CSVBuilder {
                 if(!j.equals(k)) temp.add(j);
             }
             String[] tuple = k.split(":");
-            row = "\n" + user + "/" + temp + "/" + tuple[0] + "/" + tuple[1];
+            row.append("\n" + user + ",");
+            for(int i  = temp.size()-4; i< temp.size(); i++){
+                row.append(temp.get(i).split(":")[0] + ",");
+            }
+            row.append(tuple[0] + "," + tuple[1]);
             csv.append(row);
             temp.clear();
         }
