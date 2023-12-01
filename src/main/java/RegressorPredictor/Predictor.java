@@ -1,16 +1,20 @@
 package RegressorPredictor;
 
+import org.apache.hadoop.yarn.webapp.hamlet2.Hamlet;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.ml.evaluation.RegressionEvaluator;
 import org.apache.spark.ml.feature.VectorAssembler;
 import org.apache.spark.ml.regression.RandomForestRegressionModel;
 import org.apache.spark.ml.regression.RandomForestRegressor;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.*;
 import org.apache.spark.sql.api.java.UDF1;
-import org.apache.spark.sql.functions;
 import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class Predictor {
 
@@ -20,7 +24,10 @@ public class Predictor {
     public static void main(String[] args) {
 
         String inputPath = args[0];
-        String outputPath = args[1];
+        boolean testing = false;
+        if (args.length > 1){
+            testing = Boolean.parseBoolean(args[1]);
+        }
 
 
         // Initialize Spark
@@ -35,24 +42,16 @@ public class Predictor {
         String[] featureColumns = {"userId", "userName",
                 "purchase1", "purchase2", "purchase3",
                 "purchase4", "nextPurchase", "score"};
-        Dataset<Row> data = spark.read().csv(inputPath).toDF(featureColumns).drop("userId","userName");
+        Dataset<Row> data = spark.read().csv(inputPath).toDF(featureColumns);
+        Dataset<Row> users = data.select("userId","userName");
+        data = data.drop("userId","userName");
 
 
 
-        spark.udf().register("stringToFloat", new UDF1<String, Float>() {
-            @Override
-            public Float call(String input) {
-                return Float.parseFloat(input);
-            }
-        }, DataTypes.FloatType);
+        spark.udf().register("stringToFloat", (UDF1<String, Float>) Float::parseFloat, DataTypes.FloatType);
 
 
-        spark.udf().register("stringToInt", new UDF1<String, Integer>() {
-            @Override
-            public Integer call(String input) {
-                return Integer.parseInt(input);
-            }
-        }, DataTypes.IntegerType);
+        spark.udf().register("stringToInt", (UDF1<String, Integer>) Integer::parseInt, DataTypes.IntegerType);
 
         Dataset<Row> DF = data.withColumn("p1",
                 functions.callUDF("stringToInt",
@@ -80,6 +79,12 @@ public class Predictor {
 
 
         // Split the data into training and test sets
+
+        if(testing){
+            DF = DF.randomSplit(new double[]{.1, .9})[0];
+            System.out.println("=========TESTING=========");
+        }
+
         Dataset<Row>[] splits = DF.randomSplit(new double[]{0.7, 0.3});
         Dataset<Row> trainingData = splits[0];
         Dataset<Row> testData = splits[1];
@@ -100,10 +105,12 @@ public class Predictor {
 
 
         // Create a RandomForestRegressor
+        int numTrees = 5;
+
         RandomForestRegressor rf = new RandomForestRegressor()
                 .setLabelCol("label")
                 .setFeaturesCol("features")
-                .setNumTrees(10); // Number of trees in the forest
+                .setNumTrees(numTrees); // Number of trees in the forest
 
         // Train the model
         RandomForestRegressionModel model = rf.fit(assembledTrainingData);
@@ -120,45 +127,20 @@ public class Predictor {
         double var = evaluator.evaluate(predictions);
         double rmse = evaluator.setMetricName("rmse").evaluate(predictions);
 
-        System.out.printf("Variance: %f RMSE: %f Number of Samples: %d\n", var, rmse, trainingData.count());
+        List<Row> resultList = new ArrayList<>();
+        resultList.add(RowFactory.create(numTrees,trainingData.count(),rmse,var));
+        StructType schema = DataTypes.createStructType(
+                new StructField[] {
+                        DataTypes.createStructField("Trees", DataTypes.IntegerType, false),
+                        DataTypes.createStructField("Samples", DataTypes.LongType, false),
+                        DataTypes.createStructField("RMSE", DataTypes.DoubleType, false),
+                        DataTypes.createStructField("Variance", DataTypes.DoubleType, false)
+                }
+            );
+        Dataset<Row> results = spark.createDataFrame(resultList,schema);
+        results.show();
 
         // Stop Spark
         spark.stop();
     }
 }
-//
-//        JavaRDD<List<String>> histories = data.javaRDD()
-//                .map(row -> row.getString(0).replaceAll("\\[|\\]", ""))
-//                .map(h -> Arrays.asList(h.split(",")));
-//
-//        List<PurchaseHistory> ids = histories.map(h ->{
-//            PurchaseHistory hist = new PurchaseHistory();
-//            List<Integer> tmp = new ArrayList<>();
-//            for(String s : h){
-//                tmp.add(Integer.parseInt(s.split(":")[0].strip()));
-//            }
-//            hist.setHistory(tmp);
-//            return hist;
-//        }).collect();
-//
-//        List<ScoreHistory> scores = histories.map(h ->{
-//            List<Float> list = new ArrayList<>();
-//            ScoreHistory history = new ScoreHistory();
-//            for(String s : h){
-//                list.add(Float.parseFloat(s.split(":")[1]));
-//            }
-//            history.setHistory(list);
-//            return history;
-//        }).collect();
-//
-//        data.show();
-//
-//
-//        Encoder<PurchaseHistory> purchaseHistoryEncoder = Encoders.bean(PurchaseHistory.class);
-//        Dataset<Row> test = spark.createDataset(ids,purchaseHistoryEncoder).toDF("hist");
-//        String[] strings = {"hist"};
-//        Dataset<Row> df = test.toDF(strings);
-//        OneHotEncoder oneHotEncoder = new OneHotEncoder().setInputCol("hist").setOutputCol("histVect");
-//        OneHotEncoderModel model = oneHotEncoder.fit(df);
-//        Dataset<Row> encoded = model.transform(df);
-//        encoded.show();
