@@ -7,40 +7,31 @@ public class JSONObject {
 
     private final String JSON;
 
-    public JSONObject(String json){
+    public JSONObject(String json) {
         this.JSON = json;
     }
 
     public String get(String field) {
         Pattern pattern = Pattern.compile("\"" + field + "\": ");
         Matcher matcher = pattern.matcher(JSON);
-        if(matcher.find()){
+        if (matcher.find()) {
             boolean in_quotes = false;
             int i = matcher.end();
             char c;
-            while(true){
+            while (true) {
                 c = JSON.charAt(i);
-                if(c == ',' && !in_quotes){
+                if (c == ',' && !in_quotes) {
                     break;
                 }
-                if(c == '\"' && JSON.charAt(i-1) != '\\'){
+                if (c == '\"' && JSON.charAt(i - 1) != '\\') {
                     in_quotes = !in_quotes;
                 }
                 i++;
             }
 
-            return JSON.substring(matcher.end(),i).replaceAll("^\"|\"$", "");
+            return JSON.substring(matcher.end(), i).replaceAll("^\"|\"$", "");
 
         }
         return "";
     }
-
-    //    public String getFirstKey(){
-//        return this.map.firstKey();
-//    }
-
-//    public String getFirstValue(){
-//        return get(getFirstKey());
-//    }
-
 }
