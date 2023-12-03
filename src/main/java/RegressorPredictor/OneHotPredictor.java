@@ -31,28 +31,29 @@ public class OneHotPredictor {
     private static Options buildOptions(){
         Options options = new Options();
         Option input = new Option("i", "input", true, "input file path");
-        input.setRequired(false);
+        input.setRequired(true);
         options.addOption(input)
                 .addOption(new Option("p", "predictMode", false, "predict using already trained model"))
                 .addOption(new Option("m","evaluateMode", false, "evaluate model performance"))
-                .addOption(new Option("t", "numTrees", true, "number of trees in forest"));
+                .addOption(new Option("t", "numTrees", true, "number of trees in forest"))
+                .addOption(new Option("v","vectorSize",true,"size of encoding vectors"));
 
     return options;
 
     }
 
-    public static void main(String[] args) throws ParseException, IOException {
+    private static void registerUDFS(SparkSession spark){
+        spark.udf().register("toArray", (UDF1<String, List<String>>)
+                s -> Arrays.asList(s.split(" ")), DataTypes.createArrayType(DataTypes.StringType));
 
-        SparkSession spark = SparkSession.builder().
-                appName("Predictor")
-                .getOrCreate();
+        spark.udf().register("stringToFloat", (UDF1<String, Float>) Float::parseFloat, DataTypes.FloatType);
 
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
+    }
 
+    private static CommandLine parseArgs(Options options, String[] args) {
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
         CommandLine cmd = null;
-        Options options = buildOptions();
 
         try {
             cmd = parser.parse(options, args);
@@ -62,59 +63,46 @@ public class OneHotPredictor {
             System.exit(1);
         }
 
-        spark.udf().register("toArray", (UDF1<String, List<String>>)
-                s -> Arrays.asList(s.split(" ")), DataTypes.createArrayType(DataTypes.StringType));
+        return cmd;
+    }
 
-        spark.udf().register("stringToFloat", (UDF1<String, Float>) Float::parseFloat, DataTypes.FloatType);
+    public static void main(String[] args) throws IOException {
 
+        SparkSession spark = SparkSession.builder().
+                appName("OneHotPredictor")
+                .getOrCreate();
+        registerUDFS(spark);
+
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
+
+        Options options = buildOptions();
+        CommandLine cmd = parseArgs(options,args);
 
         String inputPath = cmd.getOptionValue("i");
         String[] featureColumns = {"User Id", "User Name", "Purchase History", "Next Purchase", "Score"};
         Dataset<Row> DF = spark.read().csv(inputPath).toDF(featureColumns);
+
+        int numTrees = Integer.parseInt(cmd.getOptionValue("t","10"));
+        int vectorLength = Integer.parseInt(cmd.getOptionValue("v", "5"));
+
         if(cmd.hasOption("m")){
             modelEvaluator(DF,spark);
         }
         else if(!cmd.hasOption("p")){
-            int numTrees = 10;
-            if(cmd.hasOption("t")) numTrees = Integer.parseInt(cmd.getOptionValue("t"));
-            DF = transformData(DF, 10, true, true);
-            train(DF,numTrees);
+
+            DF = transformData(DF, vectorLength, true, true);
+            train(DF , numTrees).write().overwrite().save("/trained_model.json");
+
         }else{
-            predict(cmd.getOptionValue("h"), cmd.getOptionValue("n"), spark);
+            RandomForestRegressionModel model = RandomForestRegressionModel.load("/trained_model.json");
+            DF = transformData(DF, vectorLength, false, false);
+            predict(model, DF);
         }
         spark.stop();
 
 
     }
-
-    public static void modelEvaluator(Dataset<Row> dataset, SparkSession spark) throws IOException {
-
-        int[] vectorLength = {5,10,20};
-        int[] numTrees = {10,20,50};
-        RegressionEvaluator evaluator = new RegressionEvaluator()
-                .setLabelCol("label").setPredictionCol("prediction");
-
-        List<Row> resultList = new ArrayList<>();
-
-        for(int i = 0; i < vectorLength.length; i++) {
-
-            Dataset<Row> DF = transformData(dataset, vectorLength[i], true, false);
-            Dataset<Row>[] splits = DF.randomSplit(new double[]{0.7, 0.3});
-            Dataset<Row> trainingData = splits[0];
-            Dataset<Row> testData = splits[1];
-
-            for (int j = 0; j < numTrees.length; j++) {
-
-                RandomForestRegressionModel model = train(trainingData,numTrees[j]);
-                Dataset<Row> predictions = model.transform(testData);
-
-                double var = evaluator.setMetricName("var").evaluate(predictions);
-                double rmse = evaluator.setMetricName("rmse").evaluate(predictions);
-
-                resultList.add(
-                        RowFactory.create(vectorLength[i], numTrees[j], trainingData.count(), rmse, var));
-            }
-        }
+    public static Dataset<Row> buildResults(List<Row> results, SparkSession spark){
 
         StructType schema = DataTypes.createStructType(
                 new StructField[]{
@@ -125,9 +113,38 @@ public class OneHotPredictor {
                         DataTypes.createStructField("Variance", DataTypes.DoubleType, false)
                 }
         );
-        System.out.println(resultList);
-        Dataset<Row> results = spark.createDataFrame(resultList, schema);
-        results.show();
+        return spark.createDataFrame(results, schema);
+
+    }
+
+    public static void modelEvaluator(Dataset<Row> dataset, SparkSession spark) throws IOException {
+
+        int[] vectorLength = {5,10,20};
+        int[] numTrees = {10,20,50};
+        RegressionEvaluator evaluator = new RegressionEvaluator()
+                .setLabelCol("label").setPredictionCol("prediction");
+        List<Row> resultList = new ArrayList<>();
+
+        for (int k : vectorLength) {
+
+            Dataset<Row> DF = transformData(dataset, k, true, false);
+            Dataset<Row>[] splits = DF.randomSplit(new double[]{0.7, 0.3});
+            Dataset<Row> trainingData = splits[0];
+            Dataset<Row> testData = splits[1];
+
+            for (int numTree : numTrees) {
+
+                RandomForestRegressionModel model = train(trainingData, numTree);
+                Dataset<Row> predictions = model.transform(testData);
+
+                double var = evaluator.setMetricName("var").evaluate(predictions);
+                double rmse = evaluator.setMetricName("rmse").evaluate(predictions);
+
+                resultList.add(
+                        RowFactory.create(k, numTree, trainingData.count(), rmse, var));
+            }
+        }
+        buildResults(resultList,spark).show();
     }
 
     public static Dataset<Row> transformData(Dataset<Row> DF, int vectorLength, boolean training, boolean save) throws IOException {
@@ -144,21 +161,21 @@ public class OneHotPredictor {
                         DF.col("Next Purchase")));
 
         Word2VecModel vecModel;
-        String[] features = {"history","next"};
+        Word2Vec word2Vec;
+        String[] features = {"history","next", "label"};
 
         if(training) {
-
-            Word2Vec word2Vec = new Word2Vec()
+            word2Vec = new Word2Vec()
                     .setInputCol("purchaseHistory")
                     .setVectorSize(vectorLength)
                     .setMinCount(0);
-            vecModel = word2Vec.fit(DF);
-            if(save) vecModel.write().overwrite().save("/vector_model.json");
-            features = (String[]) ArrayUtils.add(features,"label");
+            if(save) word2Vec.write().overwrite().save("/vector_model.json");
 
         }else {
-            vecModel = Word2VecModel.load("/vector_model.json");
+            word2Vec = Word2Vec.load("/vector_model.json");
         }
+
+        vecModel = word2Vec.fit(DF);
 
         vecModel.setInputCol("purchaseHistory").setOutputCol("history");
         DF = vecModel.transform(DF);
@@ -191,26 +208,11 @@ public class OneHotPredictor {
     }
 
 
-    public static void predict(String history, String nextItem, SparkSession spark) throws IOException {
+    public static void predict(RandomForestRegressionModel model, Dataset<Row> DF) throws IOException {
 
-//        RandomForestRegressionModel model = RandomForestRegressionModel.load("/trained_model.json");
-//        List<Row> list = new ArrayList<>();
-//        list.add(RowFactory.create(history,nextItem, 3.0));
-//
-//        Dataset<Row> DF = spark.createDataFrame(list, DataTypes.createStructType(
-//                new StructField[]{
-//                        DataTypes.createStructField("Purchase History", DataTypes.StringType, true),
-//                        DataTypes.createStructField("Next Purchase", DataTypes.StringType, true),
-//                        DataTypes.createStructField("label",DataTypes.DoubleType,true)
-//                }
-//        ));
-//        DF = transformData(DF,false);
-//        DF.show();
-//        Dataset<Row> predictions = model.transform(DF);
-//        predictions.show();
-
-
-
+       Dataset<Row> predictions = model.transform(DF);
+       predictions.select("User Name", "Next Purchase", "prediction", "label").show();
+       predictions.select("prediction","label").write().mode("overwrite").format("csv").save("/onehot_result.csv");
     }
 
 }

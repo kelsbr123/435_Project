@@ -24,6 +24,10 @@ public class Predictor {
     public static void main(String[] args) {
 
         String inputPath = args[0];
+        boolean save = false;
+        if(args.length > 1){
+            save = true;
+        }
 
 
         // Initialize Spark
@@ -97,31 +101,35 @@ public class Predictor {
 
 
         // Create a RandomForestRegressor
-        int numTrees = 25;
-
-        RandomForestRegressor rf = new RandomForestRegressor()
-                .setLabelCol("label")
-                .setFeaturesCol("features")
-                .setNumTrees(numTrees); // Number of trees in the forest
-
-        // Train the model
-        RandomForestRegressionModel model = rf.fit(assembledTrainingData);
-
-        // Make predictions on the test data
-        Dataset<Row> predictions = model.transform(assembledTestData);
-
-        // Show the predictions
-        predictions.select("prediction", "label", "features").show();
-        predictions.select("prediction", "label").write().format("csv").save("/en_predictions.csv");
-
+        int[] numTrees = {100};
+        List<Row> resultList = new ArrayList<>();
         RegressionEvaluator evaluator = new RegressionEvaluator()
                 .setLabelCol("label").setPredictionCol("prediction")
                 .setMetricName("var");
-        double var = evaluator.evaluate(predictions);
-        double rmse = evaluator.setMetricName("rmse").evaluate(predictions);
 
-        List<Row> resultList = new ArrayList<>();
-        resultList.add(RowFactory.create(numTrees,trainingData.count(),rmse,var));
+        for (int numTree : numTrees) {
+
+
+            RandomForestRegressor rf = new RandomForestRegressor()
+                    .setLabelCol("label")
+                    .setFeaturesCol("features")
+                    .setNumTrees(numTree); // Number of trees in the forest
+
+            // Train the model
+            RandomForestRegressionModel model = rf.fit(assembledTrainingData);
+
+            // Make predictions on the test data
+            Dataset<Row> predictions = model.transform(assembledTestData);
+
+            // Show the predictions
+            predictions.select("prediction", "label", "features").show();
+            if(save) predictions.select("prediction","label").write().mode("overwrite").format("csv").save("/encode_output.csv");
+
+            double var = evaluator.setMetricName("var").evaluate(predictions);
+            double rmse = evaluator.setMetricName("rmse").evaluate(predictions);
+
+            resultList.add(RowFactory.create(numTree, trainingData.count(), rmse, var));
+        }
         StructType schema = DataTypes.createStructType(
                 new StructField[] {
                         DataTypes.createStructField("Trees", DataTypes.IntegerType, false),
