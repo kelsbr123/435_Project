@@ -58,7 +58,7 @@
 //                if(!history.contains(value.toString())) history.add(value.toString());
 //            }
 //            if (history.size() > 4) {
-//                String rows = CSVBuilder.buildRows(key.toString(), history);
+//                String rows = CSVBuilder.buildRows(key.toString(), history, ENCODE);
 //                context.write(new Text(rows), NullWritable.get());
 //            }
 //        }
@@ -85,7 +85,6 @@
 //
 //        FileInputFormat.addInputPath(job, new Path(args[0]));
 //        FileOutputFormat.setOutputPath(job, new Path(args[1]));
-//        ENCODE = Boolean.parseBoolean(args[2]);
 //
 //        return job.waitForCompletion(true) ? 0 : 1;
 //    }

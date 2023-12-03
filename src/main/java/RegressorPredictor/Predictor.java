@@ -24,10 +24,6 @@ public class Predictor {
     public static void main(String[] args) {
 
         String inputPath = args[0];
-        boolean testing = false;
-        if (args.length > 1){
-            testing = Boolean.parseBoolean(args[1]);
-        }
 
 
         // Initialize Spark
@@ -80,10 +76,6 @@ public class Predictor {
 
         // Split the data into training and test sets
 
-        if(testing){
-            DF = DF.randomSplit(new double[]{.1, .9})[0];
-            System.out.println("=========TESTING=========");
-        }
 
         Dataset<Row>[] splits = DF.randomSplit(new double[]{0.7, 0.3});
         Dataset<Row> trainingData = splits[0];
@@ -105,7 +97,7 @@ public class Predictor {
 
 
         // Create a RandomForestRegressor
-        int numTrees = 5;
+        int numTrees = 25;
 
         RandomForestRegressor rf = new RandomForestRegressor()
                 .setLabelCol("label")
@@ -120,6 +112,7 @@ public class Predictor {
 
         // Show the predictions
         predictions.select("prediction", "label", "features").show();
+        predictions.select("prediction", "label").write().format("csv").save("/en_predictions.csv");
 
         RegressionEvaluator evaluator = new RegressionEvaluator()
                 .setLabelCol("label").setPredictionCol("prediction")
