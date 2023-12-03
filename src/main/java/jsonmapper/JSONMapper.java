@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 
 public class JSONMapper extends Configured implements Tool {
 
-    private static boolean ENCODE = true;
+    private static boolean ENCODE = false;
     private static final int PRIME = 31;
 
     public static class JsonMapper extends Mapper<LongWritable, Text, Text, Text> {
