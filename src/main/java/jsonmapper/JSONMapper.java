@@ -22,7 +22,6 @@ import java.util.regex.Pattern;
 
 public class JSONMapper extends Configured implements Tool {
 
-    private static boolean ENCODE = false;
     private static final int PRIME = 31;
 
     public static class JsonMapper extends Mapper<LongWritable, Text, Text, Text> {
@@ -35,18 +34,19 @@ public class JSONMapper extends Configured implements Tool {
         public void map(LongWritable key, Text value, Context context) throws InterruptedException, IOException {
             String line = value.toString();
             JSONObject jsonObject = new JSONObject(line);
+            Configuration conf = context.getConfiguration();
 
             String reviewerID = jsonObject.get("reviewerID");
             String asin = jsonObject.get("asin");
 
-            if(ENCODE){
+            if(conf.getBoolean("encode", false)){
                 asin = idConverter(asin);
             }
 
             String score = jsonObject.get("overall");
             String name = jsonObject.get("reviewerName").replaceAll(",","");
 
-            context.write(new Text(reviewerID+","+name), new Text(asin + ":" + score));
+            context.write(new Text(reviewerID + "," + name), new Text(asin + ":" + score));
         }
     }
 
@@ -54,11 +54,12 @@ public class JSONMapper extends Configured implements Tool {
 
         public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
             ArrayList<String> history = new ArrayList<>();
+            boolean encode  = context.getConfiguration().getBoolean("encode",false);
             for (Text value : values) {
                 if(!history.contains(value.toString())) history.add(value.toString());
             }
             if (history.size() > 4) {
-                String rows = CSVBuilder.buildRows(key.toString(), history, ENCODE);
+                String rows = CSVBuilder.buildRows(key.toString(), history, encode);
                 context.write(new Text(rows), NullWritable.get());
             }
         }
@@ -70,17 +71,25 @@ public class JSONMapper extends Configured implements Tool {
     }
 
     public int run(String[] args) throws Exception {
+
         Configuration conf = this.getConf();
+        conf.setBoolean("encode",  Arrays.asList(args).contains("-e"));
+
         Job job = Job.getInstance(conf, "JSON Mapper");
         job.setJarByClass(JSONMapper.class);
+
         job.setMapperClass(JSONMapper.JsonMapper.class);
         job.setReducerClass(JSONMapper.JSONReducer.class);
+
         job.setMapOutputKeyClass(Text.class);
         job.setMapOutputValueClass(Text.class);
+
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(NullWritable.class);
+
         job.setInputFormatClass(TextInputFormat.class);
         job.setOutputFormatClass(TextOutputFormat.class);
+
         job.getConfiguration().set("mapreduce.output.basename", "CSV");
 
         FileInputFormat.addInputPath(job, new Path(args[0]));
