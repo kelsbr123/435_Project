@@ -1,0 +1,4 @@
+jsonmapper/JSONObject.class
+jsonmapper/CSVBuilder.class
+RegressorPredictor/OneHotPredictor.class
+RegressorPredictor/Predictor.class
